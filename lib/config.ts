@@ -12,7 +12,7 @@ export const chain: Chain = {
         symbol: "ETH",
 	},
 	rpcUrls: {
-	    default: { http: ["https://1rpc.io/sepolia"] },
+	    default: { http: ["https://rpc.sepolia.org"] },
 	},
 	testnet: true,
 };
