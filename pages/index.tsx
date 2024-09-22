@@ -2,8 +2,6 @@
 import Layout from "../components/layout"
 import abi from '@/lib/ContractAbi.json'
 import abiLend from '@/lib/ContractAbiLend.json'
-import abiToken from '@/lib/ContractAbiToken.json'
-import abiWorldID from '@/lib/abi.json'
 import { IDKitWidget, ISuccessResult, useIDKit } from '@worldcoin/idkit'
 import { useAccount, useWriteContract, useWaitForTransactionReceipt, type BaseError, useReadContract } from 'wagmi'
 import { decodeAbiParameters, parseAbiParameters } from 'viem'
@@ -27,6 +25,30 @@ export default function IndexPage() {
     const [tokenId, setTokenId] = useState<string | null>(null)
     const [typeSubmit, setTypeSubmit] = useState<string | null>(null)
     const [valueStake, setValueStake] = useState<string | null>(null)
+    const [valueUnStake, setValueUnStake] = useState<string | null>(null)
+    const [lending, setLending] = useState(false)
+    
+    useEffect(() => {
+      if(localStorage.getItem('lending') == 'true'){
+        setLending(true)
+      }
+    }, [])
+
+    useEffect(() => {
+      if(isConfirmed){
+        toast.success('Transaction successful')
+        refetchCreditScore()
+        refetchCanLend()
+        refetchLoanAmount()
+        refetchStakedBalance()
+        refetchPendingReward()
+        refetchApproved()
+        //window.location.reload()
+      }
+      if(isConfirming){
+        toast.info('Please wait for the transaction to be confirmed')
+      }
+    }, [isConfirmed,isConfirming])
 
     useEffect(() => {
         const fetchTokenId = async () => {
@@ -53,48 +75,73 @@ export default function IndexPage() {
     }, [account.address, contractAddress])
 
     const { data: nftType } = useReadContract({
-        address: contractAddress,
-        abi,
-        functionName: 'ownerNftType',
-        args: tokenId ? [account.address,BigInt(tokenId)] : undefined,
-    })
-    const { data: creditScore } = useReadContract({
+      address: contractAddress,
+      abi,
+      functionName: 'ownerNftType',
+      args: tokenId ? [account.address,BigInt(tokenId)] : undefined,
+  })
+
+    useEffect(() => {
+      if (nftType == "Netfix subscription") {
+        setIsMinted(true)
+      }
+  }, [nftType])
+
+    
+    const { data: creditScore,refetch:refetchCreditScore } = useReadContract({
       address: contractAddress,
       abi,
       functionName: 'getCreditScoreByAddress',
       args:  [account.address!]
     })
 
-    
-
-    const { data: canLend } = useReadContract({
+    const { data: canLend,refetch:refetchCanLend } = useReadContract({
       address: '0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61',
       abi: abiLend,
       functionName: 'canTakeLoan',
       args:  [account.address!]
     })
 
-    const { data: stakedBalance } = useReadContract({
+    const { data: loanAmount,refetch:refetchLoanAmount } = useReadContract({
       address: '0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61',
       abi: abiLend,
-      functionName: 'stakedBalanceOf',
+      functionName: 'loanBalanceOf',
       args:  [account.address!]
     })
 
-    const { data: pendingReward } = useReadContract({
+    const { data: stakedBalance,refetch:refetchStakedBalance } = useReadContract({
+      address: '0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61',
+      abi: abiLend,
+      functionName: 'totalStaked',
+      args:  []
+    })
+
+    const { data: pendingReward,refetch:refetchPendingReward } = useReadContract({
       address: '0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61',
       abi: abiLend,
       functionName: 'getPendingRewards',
       args:  [account.address!]
     })
+
+    const { data: approved,refetch:refetchApproved } = useReadContract({
+      address: contractAddress,
+      abi,
+      functionName: 'getApprovedContracts',
+      args:  [account.address!]
+    })
     
-    console.log('canLend',canLend)
-    console.log('pendingReward',pendingReward)
-    useEffect(() => {
-        if (nftType == "Netfix subscription") {
-          setIsMinted(true)
-        }
-    }, [nftType])
+    
+    useEffect(()=>{
+      if(Number(loanAmount) > 0){
+        setLending(true)
+      }else{
+        setLending(false)
+      }
+    },[loanAmount])
+
+    // console.log('canLend',canLend)
+    //console.log('loanAmount',loanAmount)
+    // console.log('approved',approved)
 
 
     const submitTx = async (proof: ISuccessResult) => {
@@ -116,11 +163,12 @@ export default function IndexPage() {
           ],
         })
         setDone(true)
-        toast.success('Mint successful')
-        setIsMinted(true)
         setTimeout(()=>{
           window.location.reload()
         },20000)
+        //toast.success('Mint successful')
+        setIsMinted(true)
+
       } catch (error) {console.log(error)}
     }
 
@@ -134,17 +182,19 @@ export default function IndexPage() {
           args: [],
         })
         setDone(true)
-        toast.success('Claim successful')
         setTimeout(()=>{
           window.location.reload()
         },20000)
+        //toast.success('Claim successful')
+
       } catch (error) {console.log(error)}
     }
 
     const onStake = async (proof: ISuccessResult) => {
-      try {
-        await writeContractAsync({
-          address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
+      if(parseFloat(valueStake as string) >= 0.001){
+        try {
+          await writeContractAsync({
+            address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
           account: account.address!,
           abi: abiLend,
           functionName: 'stake',
@@ -153,44 +203,55 @@ export default function IndexPage() {
         })
         setDone(true)
         setValueStake('')
-        toast.success('Stake successful')
         setTimeout(()=>{
           window.location.reload()
-        },20000)
-      } catch (error) {console.log(error)}
+          },20000)
+        //toast.success('Stake successful')
+
+        } catch (error) {console.log(error)}
+      }else{
+        toast.error('Minimum is 0.001 eth')
+      }
     }
 
     const onUnStake = async (proof: ISuccessResult) => {
-      try {
-        await writeContractAsync({
-          address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
-          account: account.address!,
-          abi: abiLend,
-          functionName: 'unstake',
-          args: [],
-          value: BigInt(parseFloat(valueStake!)*10**18)
-        })
-        setDone(true)
-        setValueStake('')
-        toast.success('UnStake successful')
-        setTimeout(()=>{
-          window.location.reload()
-        },20000)
-      } catch (error) {console.log(error)}
+      if(parseFloat(valueStake as string) >= 0.001){
+        try {
+          await writeContractAsync({
+            address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
+            account: account.address!,
+            abi: abiLend,
+            functionName: 'unstake',
+            args: [],
+            value: BigInt(parseFloat(valueUnStake!)*10**18)
+          })
+          setDone(true)
+          setValueStake('')
+          setTimeout(()=>{
+            window.location.reload()
+          },20000)
+          //toast.success('UnStake successful')
+
+        } catch (error) {console.log(error)}
+      }else{
+        toast.error('Minimum is 0.001 eth')
+      }
     }
 
     const onLending = async (proof: ISuccessResult) => {
       if(Number(stakedBalance) > 0){
         try {
-          await writeContractAsync({
-            address: contractAddress,
-            account: account.address!,
-            abi,
-            functionName: 'approveContract',
-            args: [
-              `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
-            ],
-          })
+          if(Array.isArray(approved) && approved.length == 0){
+            await writeContractAsync({
+              address: contractAddress,
+              account: account.address!,
+              abi,
+              functionName: 'approveContract',
+              args: [
+                `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
+              ],
+            })
+          }
           await writeContractAsync({
             address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
             account: account.address!,
@@ -199,17 +260,36 @@ export default function IndexPage() {
             args: [],
           })
           setDone(true)
-          toast.success('Lending successful')
+          localStorage.setItem('lending', 'true')
           setTimeout(()=>{
             window.location.reload()
           },20000)
+          setLending(true)
+          //toast.success('Lending successful')
         } catch (error) {console.log(error)}
       }else{
         toast.error('You must stake your credit score first')
       }
     }
 
-  console.log('creditScore ',creditScore)
+    const onRepay = async (proof: ISuccessResult) => {
+      try {
+        await writeContractAsync({
+          address: `0x91c0c1E8Bb63BEa1B92B16836EC68dFfD20F0C61`,
+          account: account.address!,
+          abi: abiLend,
+          functionName: 'payBackLoan',
+          args: [],
+          value: BigInt((Number(loanAmount)+200))
+        })
+        setDone(true)
+        localStorage.setItem('lending', 'false')
+        //toast.success('Repay successful')
+        setLending(false)
+      } catch (error) {console.log(error)}
+    }
+
+  //console.log('creditScore ',creditScore)
   return (
     <Layout>
       
@@ -220,12 +300,14 @@ export default function IndexPage() {
             app_id={process.env.NEXT_PUBLIC_APP_ID as `app_${string}`}
             action={process.env.NEXT_PUBLIC_ACTION as string}
             signal={account?.address}
-            onSuccess={typeSubmit == "mint"?submitTx:typeSubmit=="stake"?onStake:typeSubmit=="claim"?onClaim:typeSubmit=="unstake"?onUnStake:onLending}
+            onSuccess={typeSubmit == "mint"?submitTx:typeSubmit=="stake"?onStake:typeSubmit=="claim"?onClaim:typeSubmit=="unstake"?onUnStake:typeSubmit=="lending"?onLending:onRepay}
             autoClose
           />
         )
       }
-      <div className="max-w-6xl mx-auto p-4">
+      {
+        account?.address&&(
+          <div className="max-w-6xl mx-auto p-4">
       {
         account?.address && (
           <div className="flex md:flex-row flex-col md:space-x-6 mb-10 gap-5 md:gap-0">
@@ -304,7 +386,8 @@ export default function IndexPage() {
                           <div className="flex items-center space-x-4">
                             <input
                                 type="text"
-                                value={''}
+                                onChange={(e)=>setValueUnStake(e.target.value)}
+                                value={valueUnStake as string}
                                 placeholder="Amount to widthdraw"
                                 className="border border-gray-300 rounded-md p-2 px-3 flex-grow outline-none"
                             />
@@ -371,22 +454,26 @@ export default function IndexPage() {
                   </i>
                   </Link>
                   <div className="text-black text-lg font-bold mt-1">
-                  Credit Score From Citadel Bank
+                    Credit Score From Citadel Bank
                   </div>
                   <div className="flex justify-between items-center mt-4">
-                    <div className="text-gray-400 text-sm">
-                      <div className="mt-1">
-                      Price
-                      </div>
-                      <div className="text-black font-bold mt-1">
-                      0.023 ETH
-                      </div>
-                    </div>
                     {
-                      !done && !isMinted && <button disabled={isPending} onClick={()=>{
+                      isMinted&&(
+                        <div className="text-gray-400 text-sm">
+                          <div className="mt-1">
+                          Loan Amount
+                          </div>
+                          <div className="text-black font-bold mt-1">
+                          {(900000000000/10**18).toFixed(7)} ETH
+                          </div>
+                        </div>
+                      )
+                    }
+                    {
+                      !done && !isMinted && <button disabled={isPending || isConfirming} onClick={()=>{
                         setTypeSubmit('mint')
                         setOpen(true)
-                      }} className="button-mint mt-4 flex flex-row">
+                      }} className={`button-mint mt-4 flex flex-row ${lending&&"hidden"}`}>
                           <span className="button_top-mint">{isConfirming ?
                             <div className="flex flex-row items-center gap-1">
                               <span>isPending</span>
@@ -397,19 +484,29 @@ export default function IndexPage() {
                       </button>
                     }
                     {
-                      isMinted && <button disabled={isPending} onClick={()=>{
+                      isMinted && !lending && <button disabled={isPending || isConfirming} onClick={()=>{
                         setTypeSubmit('lending')
                         setOpen(true)
                       }} className="button-mint mt-4">
                           <span className="button_top-mint">Lending</span>
                       </button>
                     }
-                  </div>
+                    {
+                    isMinted&&lending && <button disabled={isPending || isConfirming} onClick={()=>{
+                      setTypeSubmit('repay')
+                      setOpen(true)
+                    }} className="button-mint mt-4 float-end">
+                          <span className="button_top-mint">Repay</span>
+                      </button>
+                    }
+                  </div>  
                 </div>
                 </div>
           </div>
         </section>
       </div>
+        )
+      }
     </Layout>
   )
 }
